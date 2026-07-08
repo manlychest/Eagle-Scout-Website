@@ -887,11 +887,30 @@ textarea.form-input:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0
 </div>
 
 <!-- EDIT LOG MODAL (admin) -->
-<div id="modalViewLog" class="modal-overlay hidden">
-  <div class="modal-box" style="max-width:560px;">
-    <button class="modal-close" onclick="closeModal('modalViewLog')">&times;</button>
-    <h3 id="modalLogTitle">Service Log</h3>
-    <div id="modalLogBody" style="font-size:.88rem;color:var(--ink-2);line-height:1.7;max-height:60vh;overflow-y:auto;"></div>
+<div id="modalViewLog" class="modal-overlay hidden" onclick="if(event.target===this)closeModal('modalViewLog')">
+  <div class="modal-box" style="max-width:600px;padding:0;overflow:hidden;">
+    <div id="modalLogPhoto" style="display:none;max-height:260px;overflow:hidden;background:#111;">
+      <img id="modalLogPhotoImg" src="" alt="Service photo" style="width:100%;max-height:260px;object-fit:cover;" onerror="document.getElementById('modalLogPhoto').style.display='none'">
+    </div>
+    <div style="padding:1.5rem 1.6rem 1.8rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;margin-bottom:.4rem;">
+        <div>
+          <span class="badge" id="modalLogBadge" style="margin-bottom:.5rem;display:inline-block;"></span>
+          <h3 id="modalLogTitle" style="margin:0;font-family:'Oswald',sans-serif;font-size:1.3rem;color:var(--navy);text-transform:uppercase;letter-spacing:.02em;line-height:1.2;"></h3>
+        </div>
+        <button class="modal-close" onclick="closeModal('modalViewLog')" style="flex:none;margin-top:-.2rem;">&times;</button>
+      </div>
+      <div id="modalLogMeta" style="display:flex;flex-wrap:wrap;gap:.4rem .8rem;font-size:.8rem;color:var(--ink-3);margin:.8rem 0 1rem;padding:.7rem 0;border-top:1px solid var(--cream-2);border-bottom:1px solid var(--cream-2);"></div>
+      <p id="modalLogDesc" style="font-size:.92rem;color:var(--ink-2);line-height:1.7;white-space:pre-wrap;margin-bottom:1rem;"></p>
+      <div id="modalLogPhotoLink" style="display:none;margin-top:.8rem;padding-top:.8rem;border-top:1px solid var(--cream-2);">
+        <span style="font-size:.75rem;font-weight:600;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;">Photo</span><br>
+        <a id="modalLogPhotoUrl" href="" target="_blank" rel="noopener" style="font-size:.84rem;color:var(--navy);word-break:break-all;text-decoration:underline;"></a>
+      </div>
+      <div id="modalLogDeleteRow" style="display:none;margin-top:1.2rem;padding-top:1rem;border-top:1px solid var(--cream-2);">
+        <button id="modalLogDeleteBtn" class="btn-tbl btn-delete" style="font-size:.82rem;padding:.4rem .9rem;" onclick="deleteFromModal()">Delete this log</button>
+        <span style="font-size:.75rem;color:var(--ink-3);margin-left:.6rem;">You can only delete your own logs</span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1156,12 +1175,14 @@ function loadMorePublic(){
   renderPublicLogs();
 }
 
+var _viewingLog = null; // track which log is open in modal
+
 function serviceCardHTML(l){
   var color = CAT_COLORS[l.category] || '#5C6570';
   var badgeCls = CAT_BADGE_CLASS[l.category] || 'oth';
   var dateStr = l.date ? new Date(l.date).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}) : '';
   var desc = l.description || '';
-  return '<div class="service-card">'+
+  return '<div class="service-card" onclick="openLogModal(\''+escAttr(l.id)+'\',\'public\')" style="cursor:pointer;">'+
     '<div class="card-banner" style="background:'+color+';"></div>'+
     '<div class="card-body">'+
       '<div class="card-top"><span class="badge badge-'+badgeCls+'">'+escHtml(l.category||'Other')+'</span></div>'+
@@ -1174,8 +1195,96 @@ function serviceCardHTML(l){
         (l.location?'<span>📍 '+escHtml(l.location)+'</span>':'')+
         (l.participants?'<span>👥 '+escHtml(String(l.participants))+' participants</span>':'')+
       '</div>'+
+      '<div style="margin-top:.6rem;font-size:.75rem;font-weight:600;color:var(--navy);opacity:.7;">Tap to view details →</div>'+
     '</div>'+
   '</div>';
+}
+
+function escAttr(s){ return (s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+
+function openLogModal(id, source){
+  // Look up log from cache depending on source
+  var log = null;
+  if(source === 'public'){
+    log = allPublicLogs.find(function(l){ return l.id === id; });
+  } else {
+    log = myLogs.find(function(l){ return l.id === id; });
+    // also check allPublicLogs
+    if(!log) log = allPublicLogs.find(function(l){ return l.id === id; });
+    // also check admin list
+    if(!log) log = adminAllLogs.find(function(l){ return l.id === id; });
+  }
+  if(!log){ toast('Could not find log details.','err'); return; }
+  _viewingLog = log;
+
+  var color   = CAT_COLORS[log.category]||'#5C6570';
+  var badgeCls= CAT_BADGE_CLASS[log.category]||'oth';
+  var dateStr = log.date ? new Date(log.date).toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}) : '—';
+
+  document.getElementById('modalLogTitle').textContent = log.title||'Untitled';
+
+  var badge = document.getElementById('modalLogBadge');
+  badge.textContent = log.category||'Other';
+  badge.className = 'badge badge-'+badgeCls;
+
+  document.getElementById('modalLogDesc').textContent = log.description||'No description provided.';
+
+  document.getElementById('modalLogMeta').innerHTML =
+    '<span>🦅 <strong>'+escHtml(log.eagleName||'Eagle Scout')+'</strong></span>'+
+    (log.institution?'<span>🏫 '+escHtml(log.institution)+'</span>':'')+
+    '<span>📅 '+escHtml(dateStr)+'</span>'+
+    (log.hours?'<span>⏱ <strong>'+escHtml(String(log.hours))+'</strong> hours</span>':'')+
+    (log.location?'<span>📍 '+escHtml(log.location)+'</span>':'')+
+    (log.participants?'<span>👥 '+escHtml(String(log.participants))+' participants</span>':'');
+
+  // Photo
+  var photoWrap = document.getElementById('modalLogPhoto');
+  var photoLink = document.getElementById('modalLogPhotoLink');
+  if(log.photoUrl){
+    document.getElementById('modalLogPhotoImg').src = log.photoUrl;
+    photoWrap.style.display = 'block';
+    document.getElementById('modalLogPhotoUrl').href = log.photoUrl;
+    document.getElementById('modalLogPhotoUrl').textContent = log.photoUrl;
+    photoLink.style.display = 'block';
+  } else {
+    photoWrap.style.display = 'none';
+    photoLink.style.display = 'none';
+  }
+
+  // Show delete button only if the log belongs to the current user
+  var deleteRow = document.getElementById('modalLogDeleteRow');
+  if(currentUser && log.eagleId === currentUser.uid){
+    deleteRow.style.display = 'block';
+  } else {
+    deleteRow.style.display = 'none';
+  }
+
+  showModal('modalViewLog');
+}
+
+function deleteFromModal(){
+  if(!_viewingLog) return;
+  if(!confirm('Delete this service log? This cannot be undone.')) return;
+  var id = _viewingLog.id;
+  db.collection(COLLECTION_LOGS).doc(id).delete().then(function(){
+    _pageCache = null;
+    closeModal('modalViewLog');
+    // Remove from myLogs in memory
+    myLogs = myLogs.filter(function(l){ return l.id !== id; });
+    allPublicLogs = allPublicLogs.filter(function(l){ return l.id !== id; });
+    // Refresh stats
+    var hours = myLogs.reduce(function(s,l){return s+parseFloat(l.hours||0);},0);
+    var cats  = new Set(myLogs.map(function(l){return l.category;})).size;
+    var sEl;
+    sEl = document.getElementById('myStatLogs');   if(sEl) sEl.textContent = myLogs.length;
+    sEl = document.getElementById('myStatHours');  if(sEl) sEl.textContent = hours%1===0?hours:hours.toFixed(1);
+    sEl = document.getElementById('myStatCats');   if(sEl) sEl.textContent = cats;
+    renderMyLogs();
+    toast('Log deleted.','ok');
+    _viewingLog = null;
+  }).catch(function(e){
+    toast('Error deleting log: '+e.message,'err');
+  });
 }
 
 /* filter chips */
@@ -1362,6 +1471,7 @@ function loadEagleDashboard(){
     document.getElementById('myStatLogs').textContent = myLogs.length;
     document.getElementById('myStatHours').textContent = hours%1===0?hours:hours.toFixed(1);
     document.getElementById('myStatCats').textContent = cats;
+    renderMyLogs(); // always render table when logs load
   });
 }
 
@@ -1374,13 +1484,13 @@ function renderMyLogs(){
   tbody.innerHTML = myLogs.map(function(l){
     var badgeCls = CAT_BADGE_CLASS[l.category]||'oth';
     var dateStr = l.date ? new Date(l.date).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}) : '';
-    return '<tr>'+
+    return '<tr style="cursor:pointer;" onclick="openLogModal(\''+escAttr(l.id)+'\',\'mine\')">'+
       '<td><div class="tbl-title">'+escHtml(l.title)+'</div></td>'+
       '<td><span class="badge badge-'+badgeCls+'">'+escHtml(l.category||'')+'</span></td>'+
       '<td>'+escHtml(dateStr)+'</td>'+
       '<td>'+escHtml(String(l.hours||''))+'</td>'+
       '<td>'+escHtml(l.location||'')+'</td>'+
-      '<td><div class="tbl-actions">'+
+      '<td><div class="tbl-actions" onclick="event.stopPropagation()">'+
         '<button class="btn-tbl btn-edit" onclick="editMyLog(\''+l.id+'\')">Edit</button>'+
         '<button class="btn-tbl btn-delete" onclick="deleteMyLog(\''+l.id+'\')">Delete</button>'+
       '</div></td>'+
@@ -1422,13 +1532,33 @@ function submitServiceLog(){
     record.createdAt = new Date().toISOString();
     promise = db.collection(COLLECTION_LOGS).add(record);
   }
-  promise.then(function(){
+  promise.then(function(docRef){
     btn.disabled=false;btn.textContent='Post Service Log';
     msg.textContent=(editingLogId?'Log updated!':'Log posted!');msg.className='form-msg ok';
+
+    // Immediately update myLogs in memory so the dashboard reflects without waiting
+    if(editingLogId){
+      var idx = myLogs.findIndex(function(x){return x.id===editingLogId;});
+      if(idx !== -1){
+        myLogs[idx] = Object.assign(myLogs[idx], record);
+      }
+    } else {
+      var newId = docRef ? docRef.id : ('local_'+Date.now());
+      var newLog = Object.assign({id:newId}, record);
+      myLogs.unshift(newLog);
+    }
+    // Recalculate stats immediately
+    var hours = myLogs.reduce(function(s,l){return s+parseFloat(l.hours||0);},0);
+    var cats  = new Set(myLogs.map(function(l){return l.category;})).size;
+    document.getElementById('myStatLogs').textContent = myLogs.length;
+    document.getElementById('myStatHours').textContent = hours%1===0?hours:hours.toFixed(1);
+    document.getElementById('myStatCats').textContent = cats;
+    // Re-render My Logs table immediately
+    renderMyLogs();
+
     cancelEdit();
-    loadEagleDashboard();
     toast(editingLogId?'Service log updated.':'Service log posted!','ok');
-    _pageCache = null; // invalidate so stats refresh next homepage visit
+    _pageCache = null;
     setTimeout(function(){msg.textContent='';},3000);
   }).catch(function(e){
     btn.disabled=false;btn.textContent='Post Service Log';
@@ -1625,13 +1755,13 @@ function renderAdminLogs(logs){
   tbody.innerHTML = logs.map(function(l){
     var badgeCls=CAT_BADGE_CLASS[l.category]||'oth';
     var dateStr=l.date?new Date(l.date).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
-    return '<tr>'+
+    return '<tr style="cursor:pointer;" onclick="openLogModal(\''+escAttr(l.id)+'\',\'admin\')">'+
       '<td><div class="tbl-title">'+escHtml(l.title)+'</div></td>'+
       '<td>'+escHtml(l.eagleName||l.eagleEmail||'')+'</td>'+
       '<td><span class="badge badge-'+badgeCls+'">'+escHtml(l.category||'')+'</span></td>'+
       '<td>'+escHtml(dateStr)+'</td>'+
       '<td>'+escHtml(String(l.hours||''))+'</td>'+
-      '<td><div class="tbl-actions">'+
+      '<td><div class="tbl-actions" onclick="event.stopPropagation()">'+
         '<button class="btn-tbl btn-edit" onclick="adminViewLog(\''+l.id+'\')">View</button>'+
         '<button class="btn-tbl btn-delete" onclick="adminDeleteLog(\''+l.id+'\')">Delete</button>'+
       '</div></td>'+
@@ -1642,17 +1772,7 @@ function renderAdminLogs(logs){
 function adminViewLog(id){
   var l = adminAllLogs.find(function(x){return x.id===id;});
   if(!l) return;
-  document.getElementById('modalLogTitle').textContent = l.title||'Service Log';
-  var dateStr = l.date?new Date(l.date).toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}):'';
-  document.getElementById('modalLogBody').innerHTML=
-    (l.photoUrl?'<img src="'+escHtml(l.photoUrl)+'" style="width:100%;border-radius:8px;margin-bottom:1rem;" onerror="this.style.display=\'none\'">':'')+
-    '<table style="width:100%;border-collapse:collapse;font-size:.85rem;">'+
-    row('Eagle',l.eagleName||l.eagleEmail)+row('Institution',l.institution)+
-    row('Category',l.category)+row('Date',dateStr)+
-    row('Location',l.location)+row('Hours',l.hours)+row('Participants',l.participants)+
-    '</table>'+
-    '<p style="margin-top:.8rem;line-height:1.6;">'+escHtml(l.description)+'</p>';
-  showModal('modalViewLog');
+  openLogModal(id,'admin');
 }
 function row(k,v){ return '<tr><td style="font-weight:600;padding:.3rem .5rem .3rem 0;color:var(--ink-2);white-space:nowrap;">'+k+'</td><td style="padding:.3rem 0;">'+escHtml(String(v||'—'))+'</td></tr>'; }
 
@@ -1797,7 +1917,7 @@ function toast(msg, type){
 }
 
 /* ─── PUBLIC TAB SWITCHING ───────────────────────────────── */
-var REGISTRATION_FORM_URL = "https://manlychest.github.io/eagle-scout-registration/"; // paste the URL of your hosted scout-registration.html here
+var REGISTRATION_FORM_URL = ""; // paste the URL of your hosted scout-registration.html here
 
 function showPublicTab(tab){
   document.getElementById("pubHome").classList.toggle("hidden", tab !== "home");
